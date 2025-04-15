@@ -1,36 +1,78 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Nederlandse Uitspraaktrainer
 
-## Getting Started
+Een webapplicatie voor het oefenen van Nederlandse uitspraak, met real-time spraakherkenning.
 
-First, run the development server:
+## Vereisten
+
+- Node.js (v14 of hoger)
+- Python 3.7 of hoger
+- FFmpeg
+- Vosk Nederlands taalmodel
+
+## Installatie
+
+1. Clone de repository:
+
+```bash
+git clone <repository-url>
+cd uitspraaktrainer
+```
+
+2. Installeer Node.js dependencies:
+
+```bash
+npm install
+```
+
+3. Installeer Python dependencies:
+
+```bash
+pip install vosk
+```
+
+4. Download het Vosk Nederlands taalmodel:
+
+```bash
+# Maak een directory voor het model
+mkdir vosk-model-small-nl-0.22
+cd vosk-model-small-nl-0.22
+
+# Download het model (vervang de URL met de meest recente versie)
+wget https://alphacephei.com/vosk/models/vosk-model-small-nl-0.22.zip
+unzip vosk-model-small-nl-0.22.zip
+```
+
+5. Installeer FFmpeg:
+
+- Windows: Download van https://ffmpeg.org/download.html
+- Mac: `brew install ffmpeg`
+- Linux: `sudo apt-get install ffmpeg`
+
+## Start de applicatie
+
+1. Start de development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Open http://localhost:3000 in je browser
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Gebruik
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Klik op "Start Opname" om te beginnen met opnemen
+2. Spreek het woord of de zin in
+3. Klik op "Stop Opname" om de opname te beëindigen
+4. Wacht tot de transcriptie verschijnt
+5. Vergelijk de transcriptie met wat je probeerde te zeggen
 
-## Learn More
+## Technische details
 
-To learn more about Next.js, take a look at the following resources:
+- Frontend: Next.js met TypeScript
+- Backend: Node.js + Express
+- Spraakherkenning: Vosk (offline)
+- Audio verwerking: FFmpeg
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Licentie
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+MIT
