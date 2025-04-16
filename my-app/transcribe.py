@@ -10,46 +10,28 @@ def transcribe_audio(audio_file):
     # Open the audio file
     wf = wave.open(audio_file, "rb")
     
-    # Create a recognizer with alternatives
+    # Create a recognizer
     rec = KaldiRecognizer(model, wf.getframerate())
     rec.SetWords(True)
-    rec.SetMaxAlternatives(5)  # Get up to 5 alternative transcriptions
     
     # Process the audio file
-    segments = []
-    
+    results = []
     while True:
         data = wf.readframes(4000)
         if len(data) == 0:
             break
         if rec.AcceptWaveform(data):
-            segment_result = json.loads(rec.Result())
-            if segment_result:
-                segments.append(segment_result)
+            result = json.loads(rec.Result())
+            if result.get("text"):
+                results.append(result["text"])
     
     # Get the final result
-    final_segment = json.loads(rec.FinalResult())
-    if final_segment:
-        segments.append(final_segment)
+    final_result = json.loads(rec.FinalResult())
+    if final_result.get("text"):
+        results.append(final_result["text"])
     
-    # Prepare the complete result with raw details
-    complete_result = {
-        "raw_segments": segments,
-        "raw_text": " ".join([segment.get("text", "") for segment in segments]),
-        "words": [],
-        "alternatives": []
-    }
-    
-    # Extract all words with their details
-    for segment in segments:
-        if "result" in segment:
-            complete_result["words"].extend(segment["result"])
-        
-        # Add alternatives if available
-        if "alternatives" in segment:
-            complete_result["alternatives"].extend(segment["alternatives"])
-    
-    return complete_result
+    # Return the complete transcript
+    return " ".join(results)
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
@@ -58,13 +40,8 @@ if __name__ == "__main__":
     
     audio_file = sys.argv[1]
     try:
-        result = transcribe_audio(audio_file)
-        # Output as JSON to stdout for easy parsing by backend
-        print(json.dumps(result, ensure_ascii=False))
+        transcript = transcribe_audio(audio_file)
+        print(transcript)
     except Exception as e:
-        error_response = {
-            "error": str(e),
-            "success": False
-        }
-        print(json.dumps(error_response, ensure_ascii=False), file=sys.stderr)
+        print(f"Error: {str(e)}", file=sys.stderr)
         sys.exit(1) 
