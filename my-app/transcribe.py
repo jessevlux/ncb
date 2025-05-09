@@ -1,7 +1,62 @@
 import sys
 import wave
 import json
+import re
 from vosk import Model, KaldiRecognizer
+
+# Common Dutch corrections
+DUTCH_CORRECTIONS = {
+    # Common mispronunciations
+    "de": "de",
+    "het": "het",
+    "een": "een",
+    "en": "en",
+    "in": "in",
+    "van": "van",
+    "ik": "ik",
+    "je": "je",
+    "is": "is",
+    "dat": "dat",
+    "die": "die",
+    "dit": "dit",
+    "met": "met",
+    "op": "op",
+    "te": "te",
+    "voor": "voor",
+    "zijn": "zijn",
+    "aan": "aan",
+    "ook": "ook",
+    "als": "als",
+    "bij": "bij",
+    "naar": "naar",
+    "om": "om",
+    "over": "over",
+    "per": "per",
+    "tot": "tot",
+    "uit": "uit",
+    "van": "van",
+    "via": "via",
+    "zonder": "zonder",
+}
+
+def correct_transcription(text):
+    # Split into words
+    words = text.split()
+    
+    # Apply corrections
+    corrected_words = []
+    for word in words:
+        # Convert to lowercase for comparison
+        lower_word = word.lower()
+        
+        # Check if word needs correction
+        if lower_word in DUTCH_CORRECTIONS:
+            corrected_words.append(DUTCH_CORRECTIONS[lower_word])
+        else:
+            corrected_words.append(word)
+    
+    # Join words back together
+    return " ".join(corrected_words)
 
 def transcribe_audio(audio_file):
     # Load the Dutch model
@@ -30,8 +85,13 @@ def transcribe_audio(audio_file):
     if final_result.get("text"):
         results.append(final_result["text"])
     
-    # Return the complete transcript
-    return " ".join(results)
+    # Join all results
+    transcript = " ".join(results)
+    
+    # Apply corrections
+    corrected_transcript = correct_transcription(transcript)
+    
+    return corrected_transcript
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:

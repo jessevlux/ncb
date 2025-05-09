@@ -345,6 +345,14 @@ export default function Home() {
 
   const startRecording = async () => {
     try {
+      // Check if MediaRecorder is supported
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setError(
+          "Deze browser ondersteunt geen audio-opname. Gebruik een moderne browser zoals Chrome, Firefox of Edge."
+        );
+        return;
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
@@ -419,6 +427,28 @@ export default function Home() {
 
   const toggleDarkMode = () => {
     setDarkMode(!darkMode);
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.writeText) {
+        throw new Error("Clipboard API not supported");
+      }
+      await navigator.clipboard.writeText(text);
+    } catch (err) {
+      console.error("Failed to copy to clipboard:", err);
+      // Fallback to manual copy
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      document.body.appendChild(textArea);
+      textArea.select();
+      try {
+        document.execCommand("copy");
+      } catch (copyErr) {
+        console.error("Failed to copy using fallback method:", copyErr);
+      }
+      document.body.removeChild(textArea);
+    }
   };
 
   return (
