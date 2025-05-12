@@ -189,6 +189,54 @@ const styles: Record<string, CSSProperties> = {
     height: "1.75rem",
     transition: "all 0.3s ease",
   },
+  modeToggle: {
+    display: "flex",
+    justifyContent: "center",
+    marginBottom: "20px",
+    gap: "10px",
+  },
+  modeButton: {
+    padding: "8px 16px",
+    borderRadius: "20px",
+    border: "none",
+    background: "var(--secondary-bg)",
+    color: "var(--text)",
+    cursor: "pointer",
+    transition: "all 0.3s ease",
+  },
+  modeButtonActive: {
+    background: "var(--primary)",
+    color: "white",
+  },
+  inputGroup: {
+    marginBottom: "20px",
+  },
+  input: {
+    width: "100%",
+    padding: "12px",
+    borderRadius: "8px",
+    border: "1px solid var(--border)",
+    background: "var(--secondary-bg)",
+    color: "var(--text)",
+    marginBottom: "10px",
+  },
+  feedback: {
+    marginTop: "20px",
+    padding: "15px",
+    borderRadius: "8px",
+    background: "var(--secondary-bg)",
+  },
+  score: {
+    fontSize: "1.2em",
+    fontWeight: "bold",
+    marginBottom: "10px",
+    color: "var(--primary)",
+  },
+  similarity: {
+    fontSize: "0.9em",
+    color: "var(--text-secondary)",
+    marginTop: "10px",
+  },
 };
 
 // Dark mode styles
@@ -280,6 +328,14 @@ const darkStyles: Record<string, CSSProperties> = {
     ...styles.darkModeIcon,
     color: "#93c5fd",
   },
+  modeToggle: styles.modeToggle,
+  modeButton: styles.modeButton,
+  modeButtonActive: styles.modeButtonActive,
+  inputGroup: styles.inputGroup,
+  input: styles.input,
+  feedback: styles.feedback,
+  score: styles.score,
+  similarity: styles.similarity,
 };
 
 export default function Home() {
@@ -291,6 +347,15 @@ export default function Home() {
   const [recordingTime, setRecordingTime] = useState(0);
   const [recordingAnimation, setRecordingAnimation] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
+  const [pronunciationMode, setPronunciationMode] = useState(false);
+  const [expectedText, setExpectedText] = useState("");
+  const [focusSound, setFocusSound] = useState("");
+  const [feedback, setFeedback] = useState<{
+    score: string;
+    feedback: string;
+    similarity: number;
+    transcription: string;
+  } | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -451,6 +516,54 @@ export default function Home() {
     }
   };
 
+  const handleStopRecording = async () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      setRecordingTime(0);
+
+      // Create a blob from the recorded chunks
+      const audioBlob = new Blob(audioChunksRef.current, {
+        type: "audio/webm",
+      });
+      const formData = new FormData();
+      formData.append("audio", audioBlob);
+
+      if (pronunciationMode) {
+        formData.append("expectedText", expectedText);
+        if (focusSound) {
+          formData.append("focusSound", focusSound);
+        }
+      }
+
+      try {
+        const response = await fetch("/api/transcribe", {
+          method: "POST",
+          body: formData,
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          if (pronunciationMode) {
+            setFeedback(data);
+            setTranscript(""); // Clear transcript in pronunciation mode
+          } else {
+            setTranscript(data.transcript || data.transcription);
+            setFeedback(null); // Clear feedback in free mode
+          }
+        } else {
+          setError(
+            data.error ||
+              "Er is een fout opgetreden bij het transcriberen van de audio."
+          );
+        }
+      } catch (error) {
+        setError("Er is een fout opgetreden bij het versturen van de audio.");
+      }
+    }
+  };
+
   return (
     <div style={currentStyles.container}>
       <Head>
@@ -509,8 +622,55 @@ export default function Home() {
           </p>
         </header>
 
+        <div style={currentStyles.modeToggle}>
+          <button
+            style={{
+              ...currentStyles.modeButton,
+              ...(pronunciationMode ? {} : currentStyles.modeButtonActive),
+            }}
+            onClick={() => {
+              setPronunciationMode(false);
+              setFeedback(null);
+              setTranscript("");
+            }}
+          >
+            Vrije Oefening
+          </button>
+          <button
+            style={{
+              ...currentStyles.modeButton,
+              ...(pronunciationMode ? currentStyles.modeButtonActive : {}),
+            }}
+            onClick={() => {
+              setPronunciationMode(true);
+              setTranscript("");
+            }}
+          >
+            Uitspraak Oefening
+          </button>
+        </div>
+
         <main style={currentStyles.main}>
           <div style={currentStyles.contentWrapper}>
+            {pronunciationMode && (
+              <div style={currentStyles.inputGroup}>
+                <input
+                  type="text"
+                  placeholder="Wat wil je oefenen?"
+                  value={expectedText}
+                  onChange={(e) => setExpectedText(e.target.value)}
+                  style={currentStyles.input}
+                />
+                <input
+                  type="text"
+                  placeholder="Focus klank (optioneel)"
+                  value={focusSound}
+                  onChange={(e) => setFocusSound(e.target.value)}
+                  style={currentStyles.input}
+                />
+              </div>
+            )}
+
             <div style={currentStyles.buttonSection}>
               {isRecording ? (
                 <div style={currentStyles.recordingContainer}>
@@ -528,7 +688,7 @@ export default function Home() {
                     </div>
                   </div>
                   <button
-                    onClick={stopRecording}
+                    onClick={handleStopRecording}
                     style={currentStyles.stopButton}
                   >
                     Stop Opname
@@ -538,6 +698,7 @@ export default function Home() {
                 <button
                   onClick={startRecording}
                   style={currentStyles.startButton}
+                  disabled={pronunciationMode && !expectedText}
                 >
                   Start Opname
                 </button>
@@ -546,10 +707,23 @@ export default function Home() {
 
             {error && <div style={currentStyles.errorContainer}>{error}</div>}
 
-            {transcript && (
+            {!pronunciationMode && transcript && (
               <div style={currentStyles.transcriptContainer}>
                 <h2 style={currentStyles.transcriptTitle}>Transcriptie:</h2>
                 <div style={currentStyles.transcriptContent}>{transcript}</div>
+              </div>
+            )}
+
+            {pronunciationMode && feedback && (
+              <div style={currentStyles.feedback}>
+                <div style={currentStyles.score}>{feedback.score}</div>
+                <div>{feedback.feedback}</div>
+                <div style={currentStyles.similarity}>
+                  Gelijkenis: {Math.round(feedback.similarity * 100)}%
+                </div>
+                <div style={currentStyles.transcript}>
+                  <strong>Wat je zei:</strong> {feedback.transcription}
+                </div>
               </div>
             )}
 

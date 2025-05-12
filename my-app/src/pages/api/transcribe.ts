@@ -1,165 +1,119 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { createWriteStream, unlink, existsSync } from 'fs';
+import { promises as fs } from 'fs';
+import { exec } from 'child_process';
 import { promisify } from 'util';
-import { execFile, exec } from 'child_process';
-import { join } from 'path';
-import { tmpdir } from 'os';
-import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
+import path from 'path';
+import os from 'os';
 
-// Extend NextApiRequest to include the file property
-interface NextApiRequestWithFile extends NextApiRequest {
-  file?: Express.Multer.File;
+const execAsync = promisify(exec);
+
+// Configure multer for file upload
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: os.tmpdir(),
+    filename: (req, file, cb) => {
+      cb(null, `audio-${Date.now()}.webm`);
+    },
+  }),
+});
+
+// Helper function to check dependencies
+async function checkDependencies() {
+  const issues = [];
+
+  // Check FFmpeg
+  try {
+    await execAsync('ffmpeg -version');
+  } catch (error) {
+    issues.push('FFmpeg is niet geïnstalleerd. Installeer FFmpeg om audio te kunnen verwerken.');
+  }
+
+  // Check Whisper
+  try {
+    await execAsync('pip show openai-whisper');
+  } catch (error) {
+    issues.push('Whisper is niet geïnstalleerd. Installeer Whisper met: pip install openai-whisper');
+  }
+
+  return issues;
 }
 
-const execFileAsync = promisify(execFile);
-const execAsync = promisify(exec);
-const unlinkAsync = promisify(unlink);
+// Helper function to convert audio to WAV format
+async function convertToWav(inputPath: string): Promise<string> {
+  const outputPath = inputPath.replace('.webm', '.wav');
+  await execAsync(`ffmpeg -i "${inputPath}" -acodec pcm_s16le -ar 16000 -ac 1 "${outputPath}"`);
+  return outputPath;
+}
 
-// Configure multer for memory storage
-const upload = multer({ storage: multer.memoryStorage() });
+// Helper function to run Python script
+async function runTranscriptionScript(audioPath: string, expectedText: string, focusSound?: string): Promise<any> {
+  const scriptPath = path.join(process.cwd(), 'whisper_transcribe.py');
+  const command = `python "${scriptPath}" "${audioPath}" "${expectedText}" ${focusSound ? `"${focusSound}"` : ''}`;
+  
+  try {
+    const { stdout } = await execAsync(command);
+    return JSON.parse(stdout);
+  } catch (error) {
+    console.error('Error running transcription script:', error);
+    throw new Error('Er is een fout opgetreden bij het transcriberen van de audio.');
+  }
+}
 
-// Path to FFmpeg executable - change this to your actual path
-const FFMPEG_PATH = 'C:\\ffmpeg\\bin\\ffmpeg.exe';
-
-// Helper function to run multer middleware
-const runMiddleware = (req: NextApiRequestWithFile, res: NextApiResponse, fn: any) => {
+// Configure multer middleware
+const multerMiddleware = (req: any, res: any) => {
   return new Promise((resolve, reject) => {
-    fn(req, res, (result: any) => {
-      if (result instanceof Error) {
-        return reject(result);
-      }
-      return resolve(result);
+    upload.single('audio')(req, res, (err: any) => {
+      if (err) reject(err);
+      resolve(true);
     });
   });
 };
 
-// Helper function to check if dependencies are installed
-const checkDependencies = async () => {
-  const issues: string[] = [];
-
-  // Check if FFmpeg is installed
-  if (!existsSync(FFMPEG_PATH)) {
-    issues.push('FFmpeg is niet gevonden op pad: ' + FFMPEG_PATH);
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Alleen POST requests zijn toegestaan' });
   }
 
-  // Check if Python is installed with Vosk
   try {
-    await execAsync('python -c "import vosk"');
+    // Check dependencies
+    const dependencyIssues = await checkDependencies();
+    if (dependencyIssues.length > 0) {
+      return res.status(500).json({ error: dependencyIssues.join('\n') });
+    }
+
+    // Handle file upload
+    await multerMiddleware(req, res);
+    const file = (req as any).file;
+    if (!file) {
+      return res.status(400).json({ error: 'Geen audio bestand ontvangen' });
+    }
+
+    // Get expected text and focus sound from request
+    const expectedText = req.body.expectedText;
+    const focusSound = req.body.focusSound;
+
+    // Convert audio to WAV format
+    const wavPath = await convertToWav(file.path);
+
+    // Run transcription script
+    const result = await runTranscriptionScript(wavPath, expectedText, focusSound);
+
+    // Clean up temporary files
+    await fs.unlink(file.path);
+    await fs.unlink(wavPath);
+
+    // Return transcription result
+    return res.status(200).json(result);
   } catch (error) {
-    issues.push('Python Vosk-pakket is niet geïnstalleerd. Installeer het met: pip install vosk');
+    console.error('Error in transcription API:', error);
+    return res.status(500).json({ error: 'Er is een fout opgetreden bij het verwerken van de audio.' });
   }
+}
 
-  // Check if Vosk model is present
-  if (!existsSync(join(process.cwd(), 'vosk-model-small-nl-0.22'))) {
-    issues.push('Vosk Nederlands taalmodel is niet gevonden. Download het van: https://alphacephei.com/vosk/models/vosk-model-small-nl-0.22.zip');
-  }
-
-  return issues;
-};
-
+// Configure API route to handle file uploads
 export const config = {
   api: {
     bodyParser: false,
   },
-};
-
-export default async function handler(
-  req: NextApiRequestWithFile,
-  res: NextApiResponse
-) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
-  // Check if dependencies are installed
-  const issues = await checkDependencies();
-  if (issues.length > 0) {
-    console.warn('Missing dependencies:', issues);
-    return res.status(200).json({ 
-      transcript: 'TEST MODUS: De echte spraakherkenning is niet beschikbaar. Installeer de ontbrekende dependencies:',
-      issues: issues,
-      mockMode: true
-    });
-  }
-
-  let inputFile: string | null = null;
-  let outputFile: string | null = null;
-
-  try {
-    // Handle file upload
-    await runMiddleware(req, res, upload.single('audio'));
-
-    if (!req.file) {
-      return res.status(400).json({ error: 'No audio file provided' });
-    }
-
-    // Create temporary files
-    inputFile = join(tmpdir(), `${uuidv4()}.webm`);
-    outputFile = join(tmpdir(), `${uuidv4()}.wav`);
-
-    // Write the uploaded file to disk
-    const writeStream = createWriteStream(inputFile);
-    writeStream.write(req.file.buffer);
-    writeStream.end();
-
-    // Wait for the write stream to finish
-    await new Promise<void>((resolve, reject) => {
-      writeStream.on('finish', () => resolve());
-      writeStream.on('error', (error) => reject(error));
-    });
-
-    // Convert to WAV format using ffmpeg
-    try {
-      await execFileAsync(FFMPEG_PATH, [
-        '-i', inputFile,
-        '-ac', '1', // Convert to mono
-        '-ar', '16000', // Set sample rate to 16kHz
-        outputFile
-      ]);
-    } catch (ffmpegError) {
-      console.error('FFmpeg error:', ffmpegError);
-      throw new Error('Failed to convert audio file');
-    }
-
-    // Run Python script for transcription
-    try {
-      const { stdout, stderr } = await execFileAsync('python', [
-        join(process.cwd(), 'transcribe.py'),
-        outputFile
-      ]);
-
-      if (stderr) {
-        console.error('Python script stderr:', stderr);
-      }
-
-      // Return the transcription
-      res.status(200).json({ transcript: stdout.trim() });
-    } catch (pythonError) {
-      console.error('Python script error:', pythonError);
-      throw new Error('Failed to transcribe audio');
-    }
-  } catch (error) {
-    console.error('Error processing audio:', error);
-    res.status(500).json({ 
-      error: 'Error processing audio file',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
-  } finally {
-    // Clean up temporary files
-    if (inputFile) {
-      try {
-        await unlinkAsync(inputFile);
-      } catch (error) {
-        console.error('Error deleting input file:', error);
-      }
-    }
-    if (outputFile) {
-      try {
-        await unlinkAsync(outputFile);
-      } catch (error) {
-        console.error('Error deleting output file:', error);
-      }
-    }
-  }
-} 
+}; 
