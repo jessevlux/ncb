@@ -85,6 +85,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Handle file upload
     await multerMiddleware(req, res);
     const file = (req as any).file;
+    console.log("Bestand ontvangen:", file.path, "Grootte:", file.size);
     if (!file) {
       return res.status(400).json({ error: 'Geen audio bestand ontvangen' });
     }

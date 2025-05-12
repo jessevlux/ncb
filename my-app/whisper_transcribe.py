@@ -4,7 +4,7 @@ import os
 import difflib
 import whisper
 
-# Load Whisper model
+# Load Whisper model - using small for better speed/accuracy balance
 model = whisper.load_model("small")
 
 # Dutch words for pronunciation practice
@@ -23,15 +23,49 @@ DUTCH_WORDS = {
     "oe": ["moes", "poes", "zoet", "roet", "boer"]
 }
 
-def transcribe_audio(audio_file):
+def transcribe_audio(audio_file, expected_text="", focus_sound=""):
     """Transcribe audio using Whisper"""
     try:
-        # Load and transcribe audio
-        result = model.transcribe(audio_file, language="nl")
-        return result["text"].strip()
+        # Create a more specific prompt for non-native speakers
+        prompt = f"""Dit is een Nederlandse uitspraak oefening. 
+De spreker is een taalleerder die Nederlands leert.
+De verwachte tekst is: "{expected_text}"
+De focus klank is: "{focus_sound}"
+Let extra op de uitspraak van de {focus_sound} klank.
+Transcribeer exact wat de spreker zegt, ook als de uitspraak niet perfect is.
+De spreker zegt: """
+
+        # Load and transcribe audio with optimized settings for non-native speakers
+        result = model.transcribe(
+            audio_file,
+            language="nl",
+            task="transcribe",
+            beam_size=5,
+            best_of=5,
+            temperature=0.0,  
+            compression_ratio_threshold=2.4,
+            condition_on_previous_text=True,
+            initial_prompt=prompt,
+            word_timestamps=True,  # Voor betere klankherkenning
+            suppress_tokens=[],  # Geen tokens onderdrukken
+            no_speech_threshold=0.6,  # Meer tolerant voor pauzes
+            logprob_threshold=-1.0,  # Meer tolerant voor onzekere voorspellingen
+        )
+        
+        transcription = result["text"].strip()
+        
+        # Prepare response
+        response = {
+            "transcription": transcription,
+            "expected": expected_text,
+            "focus_sound": focus_sound,
+            "confidence": result.get("confidence", 0.0)  # Voeg confidence score toe
+        }
+        
+        # Print as JSON for the API to parse
+        print(json.dumps(response))
     except Exception as e:
         print(f"Error transcribing audio: {str(e)}")
-        return None
 
 def compare_pronunciation(expected, actual, focus_sound=None):
     """Compare expected and actual pronunciation"""
@@ -82,33 +116,15 @@ def generate_feedback(expected, actual, focus_sound, similarity):
         }
 
 def main():
-    if len(sys.argv) < 3:
-        print("Usage: python whisper_transcribe.py <audio_file> <expected_text> [focus_sound]")
+    if len(sys.argv) < 2:
+        print("Usage: python whisper_transcribe.py <audio_file> [expected_text] [focus_sound]")
         sys.exit(1)
     
     audio_file = sys.argv[1]
-    expected_text = sys.argv[2]
-    focus_sound = sys.argv[3] if len(sys.argv) > 3 else None
+    expected_text = sys.argv[2] if len(sys.argv) > 2 else ""
+    focus_sound = sys.argv[3] if len(sys.argv) > 3 else ""
     
-    # Transcribe audio
-    actual_text = transcribe_audio(audio_file)
-    if not actual_text:
-        print(json.dumps({
-            "error": "Kon de audio niet transcriberen"
-        }))
-        sys.exit(1)
-    
-    # Compare pronunciations
-    similarity = compare_pronunciation(expected_text, actual_text, focus_sound)
-    
-    # Generate feedback
-    feedback = generate_feedback(expected_text, actual_text, focus_sound, similarity)
-    
-    # Add transcription to feedback
-    feedback["transcription"] = actual_text
-    
-    # Output JSON result
-    print(json.dumps(feedback))
+    transcribe_audio(audio_file, expected_text, focus_sound)
 
 if __name__ == "__main__":
     main() 

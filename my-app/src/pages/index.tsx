@@ -340,6 +340,7 @@ const darkStyles: Record<string, CSSProperties> = {
 
 export default function Home() {
   const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [error, setError] = useState("");
   const [issues, setIssues] = useState<string[]>([]);
@@ -419,7 +420,23 @@ export default function Home() {
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      let mediaRecorder: MediaRecorder;
+      // Probeer met expliciete codec
+      const mimeType = "audio/webm;codecs=opus";
+      if (
+        MediaRecorder.isTypeSupported &&
+        MediaRecorder.isTypeSupported(mimeType)
+      ) {
+        mediaRecorder = new MediaRecorder(stream, {
+          mimeType,
+          audioBitsPerSecond: 128000,
+        });
+      } else {
+        setError(
+          "Deze browser ondersteunt het audioformaat 'audio/webm;codecs=opus' niet. Probeer een andere browser zoals Chrome of Firefox."
+        );
+        return;
+      }
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
@@ -429,7 +446,8 @@ export default function Home() {
         }
       };
 
-      mediaRecorder.start();
+      // Start recording and request data every second
+      mediaRecorder.start(1000);
       setIsRecording(true);
       setError("");
       setIssues([]);
@@ -446,11 +464,56 @@ export default function Home() {
 
     return new Promise<void>((resolve) => {
       mediaRecorderRef.current!.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, {
-          type: "audio/webm",
-        });
-        await sendAudioToBackend(audioBlob);
-        resolve();
+        setTimeout(async () => {
+          const audioBlob = new Blob(audioChunksRef.current, {
+            type: "audio/webm",
+          });
+
+          console.log("Audio blob size:", audioBlob.size, "bytes");
+
+          const formData = new FormData();
+          formData.append("audio", audioBlob, "recording.webm");
+
+          if (pronunciationMode) {
+            formData.append("expectedText", expectedText);
+            if (focusSound) {
+              formData.append("focusSound", focusSound);
+            }
+          }
+
+          setIsTranscribing(true);
+          try {
+            const response = await fetch("/api/transcribe", {
+              method: "POST",
+              body: formData,
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+              if (pronunciationMode) {
+                setFeedback(data);
+                setTranscript(""); // Clear transcript in pronunciation mode
+              } else {
+                setTranscript(data.transcript || data.transcription);
+                setFeedback(null); // Clear feedback in free mode
+              }
+            } else {
+              setError(
+                data.error ||
+                  "Er is een fout opgetreden bij het transcriberen van de audio."
+              );
+            }
+          } catch (error) {
+            setError(
+              "Er is een fout opgetreden bij het versturen van de audio."
+            );
+            console.error("Upload error:", error);
+          } finally {
+            setIsTranscribing(false);
+          }
+          resolve();
+        }, 500);
       };
 
       mediaRecorderRef.current!.stop();
@@ -459,35 +522,6 @@ export default function Home() {
         .forEach((track) => track.stop());
       setIsRecording(false);
     });
-  };
-
-  const sendAudioToBackend = async (audioBlob: Blob) => {
-    try {
-      const formData = new FormData();
-      formData.append("audio", audioBlob, "recording.webm");
-
-      const response = await fetch("/api/transcribe", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!response.ok && response.status !== 200) {
-        throw new Error("Server error");
-      }
-
-      const data = await response.json();
-      setTranscript(data.transcript);
-
-      if (data.mockMode) {
-        setIsTestMode(true);
-        setIssues(data.issues || []);
-      } else {
-        setIsTestMode(false);
-      }
-    } catch (err) {
-      setError("Er is een fout opgetreden bij het verwerken van de opname.");
-      console.error("Error sending audio:", err);
-    }
   };
 
   const toggleDarkMode = () => {
@@ -518,49 +552,7 @@ export default function Home() {
 
   const handleStopRecording = async () => {
     if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      setRecordingTime(0);
-
-      // Create a blob from the recorded chunks
-      const audioBlob = new Blob(audioChunksRef.current, {
-        type: "audio/webm",
-      });
-      const formData = new FormData();
-      formData.append("audio", audioBlob);
-
-      if (pronunciationMode) {
-        formData.append("expectedText", expectedText);
-        if (focusSound) {
-          formData.append("focusSound", focusSound);
-        }
-      }
-
-      try {
-        const response = await fetch("/api/transcribe", {
-          method: "POST",
-          body: formData,
-        });
-
-        const data = await response.json();
-
-        if (response.ok) {
-          if (pronunciationMode) {
-            setFeedback(data);
-            setTranscript(""); // Clear transcript in pronunciation mode
-          } else {
-            setTranscript(data.transcript || data.transcription);
-            setFeedback(null); // Clear feedback in free mode
-          }
-        } else {
-          setError(
-            data.error ||
-              "Er is een fout opgetreden bij het transcriberen van de audio."
-          );
-        }
-      } catch (error) {
-        setError("Er is een fout opgetreden bij het versturen van de audio.");
-      }
+      await stopRecording();
     }
   };
 
@@ -748,6 +740,25 @@ export default function Home() {
           <p>© {new Date().getFullYear()} Nederlandse Uitspraaktrainer</p>
         </footer>
       </div>
+
+      {isTranscribing && (
+        <div
+          style={{
+            position: "fixed",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            background: "rgba(0, 0, 0, 0.8)",
+            color: "white",
+            padding: "20px",
+            borderRadius: "10px",
+            zIndex: 1000,
+          }}
+        >
+          Bezig met transcriberen...
+        </div>
+      )}
+
       <style jsx global>{`
         @keyframes pulse {
           0% {
